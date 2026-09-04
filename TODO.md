@@ -165,11 +165,12 @@ that one cell on **plain SGD** instead, which reproduced a clean 1-step lag on b
       run). `results_nanogpt.json` recovered via `extract_results.py`; item 3 again reproduces
       the lesson's exact figures (2.6000 vs 3.0000, 15.38%); item 5 MFU = 2.68% (fp16 on T4,
       measured against a real matmul benchmark peak, not a spec sheet).
-- [ ] **S2. Write `README.md`** from both real result files via `tools/build_readme.py` (exits
-      non-zero on any unresolved placeholder). Fill in the two `[fill in after the real run]`
-      remarks in `README.tmpl.md` (§5's "what costs the distance to 40%" and the closing "what
-      running this twice actually showed") once both real numbers are in hand. Edit the template,
-      never `README.md`.
+- [x] **S2. Write `README.md`** — done 2026-09-04. Built via `tools/build_readme.py` from both
+      real `results_*.json` (101 values filled, no unresolved placeholders). Both synthesis
+      sections in `README.tmpl.md` written from the real numbers: §5 explains the proxy's ~2x
+      higher MFU as vocab-head matmul size, not raw GPU speed or dtype; the closing section notes
+      the identical 1-step norm-before-loss lag on both models (achieved only after per-model SGD
+      lr tuning) and the EC2-vs-Colab artifact-recovery reliability gap.
 - [ ] **S3. Push** via subtree split (below), with both `.ipynb`s, both `results_*.json`, and logs.
 - [ ] **S4. Verify the README link in an incognito window**, then tick the form's checkbox honestly.
 - [ ] **S5. Submit** the GitHub README.md link and record it back in this file.
