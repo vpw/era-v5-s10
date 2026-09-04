@@ -35,6 +35,18 @@ import os, sys, subprocess, pathlib, urllib.request
 
 IN_COLAB = "google.colab" in sys.modules or os.path.exists("/content")
 
+
+def download_if_colab(path):
+    """Colab's local disk is ephemeral — force each plot into the browser's Downloads
+    folder as it's produced, rather than relying on it surviving until the run ends."""
+    if IN_COLAB:
+        try:
+            from google.colab import files
+            files.download(path)
+        except Exception as e:
+            print(f"(download skipped for {path}: {e})")
+
+
 for pkg in ("torch", "matplotlib", "ml_dtypes", "numpy"):
     try:
         __import__(pkg)
@@ -392,6 +404,7 @@ axes[1].set_title("equal micro-batch token counts — bug hides")
 axes[1].set_xlabel("step"); axes[1].legend()
 fig.tight_layout()
 fig.savefig("assets/nanogpt_accumulation_curves.png", dpi=120)
+download_if_colab("assets/nanogpt_accumulation_curves.png")
 plt.close(fig)
 
 gap_unequal = abs(curve_wrong[-1] - curve_correct[-1])
@@ -409,6 +422,13 @@ normalised by a running estimate of gradient magnitude, so a single spiked gradi
 pollutes that running estimate rather than producing an oversized *update* — which would mask
 exactly the raw-gradient-to-update relationship this item is about. Plain SGD (`update = -lr ×
 grad`) keeps that relationship direct; elsewhere in this notebook AdamW is used as normal.
+
+**`lr=0.05` here, not the proxy notebook's `lr=1.0`.** The two notebooks train different
+architectures (LayerNorm + learned positions + GELU here, vs RMSNorm + RoPE + SwiGLU there), and
+`lr=1.0` plain SGD turned out to sit right at the edge of this model's stability — a first attempt
+at this scale diverged on its own by step ~30, before the engineered spike ever fired, which would
+have confounded the demonstration with an unrelated instability. `lr=0.05` keeps the pre-spike
+loss flat and reproducible across seeds while still producing a clearly visible post-spike crack.
 """
 
 # %%
@@ -417,7 +437,7 @@ SCALE = 50.0
 NORM_STEPS = 60
 
 norm_model = build(cfg, seed=7)
-opt = torch.optim.SGD(norm_model.parameters(), lr=1.0)
+opt = torch.optim.SGD(norm_model.parameters(), lr=0.05)
 g = torch.Generator().manual_seed(7)
 
 norms, losses = [], []
@@ -452,6 +472,7 @@ if crack_step is not None:
 axes[1].set_ylabel("loss"); axes[1].set_xlabel("step")
 fig.tight_layout()
 fig.savefig("assets/nanogpt_norm_before_loss.png", dpi=120)
+download_if_colab("assets/nanogpt_norm_before_loss.png")
 plt.close(fig)
 
 print(f"4. engineered spike at step {BAD_STEP}: grad norm {norms[BAD_STEP - 1]:.3f} -> {norms[BAD_STEP]:.3f}")
