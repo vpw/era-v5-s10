@@ -1,0 +1,114 @@
+{
+  "config": {
+    "V": 10000,
+    "D": 256,
+    "n_layer": 4,
+    "n_head": 4,
+    "T": 128,
+    "B": 8,
+    "N_params": 8333568,
+    "tokenizer": "ERA V5 Session 2 BPE (10,000 merges, en/hi/te/mr)",
+    "device": "cuda",
+    "gpu_name": "NVIDIA A10G",
+    "sm": "86",
+    "bf16_native": true,
+    "train_dtype": "torch.bfloat16",
+    "torch": "2.5.1+cu121"
+  },
+  "1_shapes": {
+    "tokens": "(8, 128)",
+    "hidden": "(8, 128, 256)",
+    "head_weight": "(10000, 256)",
+    "logits": "(8, 128, 10000)",
+    "logits_grad": "(8, 128, 10000)",
+    "head_weight_grad": "(10000, 256)",
+    "embed_weight_grad": "(10000, 256)",
+    "qkv_weight_grad": "(768, 256)"
+  },
+  "2_gradient_check": {
+    "toy_chain": {
+      "w1": 3.0,
+      "w2": 4.0,
+      "loss": 7.654158592224121,
+      "dL_dw1_analytic": 64.0,
+      "dL_dw1_autograd": 64.0,
+      "dL_dw1_central_diff": 63.99583435058594
+    },
+    "real_weight": {
+      "row": 356,
+      "col": 158,
+      "eps": 0.01,
+      "central_diff": 0.0213623046875,
+      "autograd": 0.02128482051193714,
+      "abs_diff": 7.748417556285858e-05
+    }
+  },
+  "3_accumulation": {
+    "static": {
+      "micro_batches": [
+        [
+          4,
+          2.0
+        ],
+        [
+          4,
+          2.0
+        ],
+        [
+          2,
+          5.0
+        ]
+      ],
+      "correct": 2.6,
+      "wrong": 3.0,
+      "pct_error": 15.38461538461538
+    },
+    "curves": {
+      "final_gap_unequal_tokens": 0.03905326441714596,
+      "final_gap_equal_tokens": 0.0,
+      "steps": 120
+    }
+  },
+  "4_norm_before_loss": {
+    "bad_step": 30,
+    "scale": 50.0,
+    "norm_before": 10.429021835327148,
+    "norm_at": 81.318115234375,
+    "loss_baseline": 8.924948120117188,
+    "loss_at_bad_step": 8.965913772583008,
+    "crack_step": 31,
+    "lag_steps": 1
+  },
+  "5_mfu": {
+    "N": 8333568,
+    "tokens_per_sec": 66710.65574255296,
+    "achieved_flops": 3335626715730.9336,
+    "peak_flops": 62334650670254.75,
+    "peak_source": "measured: 4096x4096 matmul benchmark, same device/dtype",
+    "mfu_pct": 5.351159715927708,
+    "dtype": "torch.bfloat16"
+  },
+  "6_bits": {
+    "fp32": {
+      "sign": 0,
+      "exponent_biased": 123,
+      "mantissa": "10011001100110011001101",
+      "value": 0.10000000149011612,
+      "error": 1.4901161138336505e-09
+    },
+    "bf16": {
+      "sign": 0,
+      "exponent_biased": 123,
+      "mantissa": "1001101",
+      "value": 0.10009765625,
+      "error": 9.765624999999445e-05
+    },
+    "fp8_e4m3": {
+      "sign": 0,
+      "exponent_biased": 3,
+      "mantissa": "101",
+      "value": 0.1015625,
+      "error": 0.0015624999999999944
+    }
+  }
+}

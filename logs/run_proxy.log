@@ -1,0 +1,156 @@
+==============================================================================
+=== cell 1
+==============================================================================
+assets: ['corpus_en.txt', 'tokenizer.json']
+
+==============================================================================
+=== cell 2
+==============================================================================
+torch 2.5.1+cu121 · device cuda (NVIDIA A10G, sm_86)
+bf16 native (tensor-core accelerated): True
+training dtype for this run: torch.bfloat16
+
+==============================================================================
+=== cell 4
+==============================================================================
+V = 10,000   D = 256   layers = 4   heads = 4
+T = 128   B = 8
+
+==============================================================================
+=== cell 5
+==============================================================================
+corpus: 117,186 tokens
+batch shape: torch.Size([8, 128])
+
+==============================================================================
+=== cell 7
+==============================================================================
+model: 8,333,568 parameters
+
+==============================================================================
+=== cell 9
+==============================================================================
+  tokens                                 (8, 128)           B=batch of independent sequences, T=position in the sequence
+  hidden (trunk output)                  (8, 128, 256)      B, T as above, D=residual-stream width (one vector per position)
+  head.weight  (W_vocab)                 (10000, 256)       V=one row per vocabulary entry, D as above; z = h @ W_vocab^T
+  logits                                 (8, 128, 10000)    B, T as above, V=one score per vocabulary entry
+  logits.grad                            (8, 128, 10000)    same shape as logits — one gradient per (batch, position, vocab-entry) score
+  head.weight.grad                       (10000, 256)       same shape as head.weight — every row (every vocab entry) gets an update
+  trunk.embed.weight.grad                (10000, 256)       [V, D] — the input embedding table, gradient shaped like the table
+  trunk.blocks[0].attn.qkv.weight.grad   (768, 256)         [3D, D] — packed Q,K,V projection, gradient matches the weight
+
+==============================================================================
+=== cell 11
+==============================================================================
+2a. toy chain  w1=3, x=2, w2=4, t=20
+    forward: h=6.0, y=24.0, loss=16.0
+    dL/dy=8.0  dL/dw2=48.0  dL/dh=32.0  dL/dw1=64.0
+    autograd w1.grad=64.0  w2.grad=48.0
+    analytic == autograd (w1): True
+    central diff (eps=0.001): 63.9958  vs autograd 64.0000  (agree to 4.17e-03)
+
+==============================================================================
+=== cell 12
+==============================================================================
+2b. real weight head.weight[356,158]  (eps=0.01)
+    L(w)      = 9.272727
+    L(w+eps)  = 9.272941
+    L(w-eps)  = 9.272513
+    central-difference grad = 0.021362
+    autograd .grad          = 0.021285
+    absolute difference     = 7.75e-05
+
+==============================================================================
+=== cell 14
+==============================================================================
+3a. static replica of the lesson's numbers
+    micro-batches (tokens, mean_loss): [(4, 2.0), (4, 2.0), (2, 5.0)]
+    correct  = total_loss/total_tokens = 26.0/10 = 2.6000
+    wrong    = average of the means     = 3.0000
+    error    = 15.4%  (lesson: 2.6000 vs 3.0000 = 15.4%)
+
+==============================================================================
+=== cell 15
+==============================================================================
+3b. final loss gap, unequal token counts: 0.0391
+    final loss gap, equal token counts:   0.0000  (near zero — this is why it hides)
+    saved assets/proxy_accumulation_curves.png
+
+==============================================================================
+=== cell 17
+==============================================================================
+4. engineered spike at step 30: grad norm 10.429 -> 81.318
+   loss at step 30: 8.9659  (baseline 8.9249)
+   loss visibly cracks at step: 31  (lag = 1 steps)
+   saved assets/proxy_norm_before_loss.png
+
+==============================================================================
+=== cell 19
+==============================================================================
+5a. measured peak: 62.33 TFLOP/s  (4096x4096 matmul, torch.bfloat16, cuda)
+
+==============================================================================
+=== cell 20
+==============================================================================
+5b. N = 8,333,568 params
+    measured tokens/s = 66,711  (40 steps, B=8, T=128, dtype=torch.bfloat16)
+    achieved FLOP/s   = 3.34 TFLOP/s
+    peak FLOP/s       = 62.33 TFLOP/s  (measured: 4096x4096 matmul benchmark, same device/dtype)
+    MFU               = 5.35%
+    device            = NVIDIA A10G (sm_86), bf16-native=True
+
+==============================================================================
+=== cell 22
+==============================================================================
+0.1 in binary (repeating): 0.0001100110011001100110011... = 1.10011001100...(2) x 2^-4
+
+fp32  (1+8+23): sign=0  exponent=123 (biased, unbiased=-4)  mantissa=10011001100110011001101
+      stored value = 0.1000000015   struct.pack round-trip = 0.1000000015
+      representation error = 1.490e-09
+
+bf16  (1+8+7):  sign=0  exponent=123 (biased, unbiased=-4)  mantissa=1001101
+      stored value (hand-decoded) = 0.1000976562   ml_dtypes stores = 0.1000976562
+      representation error = 9.766e-05   (hand decode matches ml_dtypes: True)
+
+fp8 E4M3 (1+4+3): sign=0  exponent=3 (biased, unbiased=-4)  mantissa=101
+      stored value (hand-decoded) = 0.101562   ml_dtypes stores = 0.101562
+      representation error = 1.562e-03   (hand decode matches ml_dtypes: True)
+
+6b. which one would you train in, and why
+    fp32 error 1.49e-09 < bf16 error 9.77e-05 < fp8 error 1.56e-03
+    bf16 keeps fp32's full 8-bit exponent range (same dynamic range, no loss-scaling knob)
+    and pays for it in mantissa precision only — the §10 trade this session names as the
+    reason bf16 replaced fp16. fp8 E4M3 is named here as the production recipe it now is,
+    not as what this run trains in.
+
+==============================================================================
+=== cell 24
+==============================================================================
+wrote results_proxy.json
+{
+  "config": {
+    "V": 10000,
+    "D": 256,
+    "n_layer": 4,
+    "n_head": 4,
+    "T": 128,
+    "B": 8,
+    "N_params": 8333568,
+    "tokenizer": "ERA V5 Session 2 BPE (10,000 merges, en/hi/te/mr)",
+    "device": "cuda",
+    "gpu_name": "NVIDIA A10G",
+    "sm": "86",
+    "bf16_native": true,
+    "train_dtype": "torch.bfloat16",
+    "torch": "2.5.1+cu121"
+  },
+  "5_mfu": {
+    "N": 8333568,
+    "tokens_per_sec": 66710.65574255296,
+    "achieved_flops": 3335626715730.9336,
+    "peak_flops": 62334650670254.75,
+    "peak_source": "measured: 4096x4096 matmul benchmark, same device/dtype",
+    "mfu_pct": 5.351159715927708,
+    "dtype": "torch.bfloat16"
+  }
+}

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+logs/nbexec.log
+
+# bootstrap-fetched at runtime (notebook_src_*.py's own bootstrap cell) — not authored content,
+# re-downloaded fresh on the EC2 box / Colab each run. The generated plots ARE committed.
+assets/tokenizer.json
+assets/corpus_en.txt
+assets/tinyshakespeare.txt
