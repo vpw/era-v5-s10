@@ -152,9 +152,19 @@ that one cell on **plain SGD** instead, which reproduced a clean 1-step lag on b
       overhead dominates at this scale, not FLOP throughput). `S10_proxy.ipynb`,
       `results_proxy.json`, `assets/proxy_accumulation_curves.png`,
       `assets/proxy_norm_before_loss.png` pulled back. Instance stopped and verified (2026-09-04).
-- [ ] **S1b. Run `notebook_src_nanogpt.py` on free-tier Colab** (Lane B — user drives the browser:
-      Runtime > T4 GPU > Run all > download the executed `.ipynb`), then recover
-      `results_nanogpt.json` via `scripts/extract_results.py`.
+- [x] **S1b. Run `notebook_src_nanogpt.py` on free-tier Colab** — done 2026-09-04, after one
+      retry. First attempt used `lr=1.0` (tuned against the proxy model) for item 4's SGD; on the
+      real Tesla T4 the loss was already 2.4x above `ln(65)=4.17` by step ~28 and jumped 12x
+      further exactly at the announced bad step — before the engineered gradient scaling could
+      have had any effect, so `lr=1.0` was simply unstable for this architecture on its own.
+      CPU tuning across 3 seeds found `lr=0.05` keeps the pre-spike loss flat and reproducible;
+      re-ran on Colab and got a clean result: `loss_baseline=3.224`, `loss_at_bad_step=3.322`
+      (+3.0%), crack at step 31 (1-step lag) — matches the CPU tuning almost exactly. Also added
+      explicit `files.download()` calls for the two plot PNGs, since Colab's local disk is
+      ephemeral and they weren't embedded as displayed cell outputs (missing after the first
+      run). `results_nanogpt.json` recovered via `extract_results.py`; item 3 again reproduces
+      the lesson's exact figures (2.6000 vs 3.0000, 15.38%); item 5 MFU = 2.68% (fp16 on T4,
+      measured against a real matmul benchmark peak, not a spec sheet).
 - [ ] **S2. Write `README.md`** from both real result files via `tools/build_readme.py` (exits
       non-zero on any unresolved placeholder). Fill in the two `[fill in after the real run]`
       remarks in `README.tmpl.md` (§5's "what costs the distance to 40%" and the closing "what

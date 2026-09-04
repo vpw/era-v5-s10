@@ -1,0 +1,125 @@
+==============================================================================
+=== cell 1
+==============================================================================
+assets: ['nanogpt_accumulation_curves.png', 'nanogpt_norm_before_loss.png', 'tinyshakespeare.txt']
+
+==============================================================================
+=== cell 2
+==============================================================================
+in_colab=True  torch 2.11.0+cu128  device cuda (Tesla T4, sm_75)
+bf16 native (tensor-core accelerated): False
+training dtype for this run: torch.float16
+NOTE: T4 (or older) — bf16 would be emulated here, not accelerated.
+      Training/MFU below are measured in fp16, this GPU's native accelerated format.
+
+==============================================================================
+=== cell 4
+==============================================================================
+corpus: 1,115,394 chars, vocab V=65
+C (n_embd) = 128   layers = 4   heads = 4
+T = 128   B = 8
+batch shape: torch.Size([8, 128])  sample decode: nsman and thy friends, I'll have more li
+
+==============================================================================
+=== cell 6
+==============================================================================
+model: 813,440 parameters (weight-tied: wte/lm_head share 8,320)
+
+==============================================================================
+=== cell 8
+==============================================================================
+  tokens                                   (8, 128)     B=batch of independent char windows, T=position in the window
+  wte(tokens)+wpe(pos)  hidden             (8, 128, 128) B, T as above, C=embedding width (n_embd)
+  lm_head.weight  (tied to wte.weight)     (65, 128)    V=one row per character, C as above; z = h @ W^T, same tensor as the input embedding
+  logits                                   (8, 128, 65) B, T as above, V=one score per character
+  logits.grad                              (8, 128, 65) same shape as logits — one gradient per (batch, position, character) score
+  lm_head.weight.grad                      (65, 128)    same shape as lm_head.weight — because of tying, this IS wte.weight.grad too
+  wte.weight.grad is lm_head.weight.grad   True         tying means one gradient tensor serves both roles, not two equal ones
+  blocks[0].attn.c_attn.weight.grad        (384, 128)   [3C, C] — packed Q,K,V projection, gradient matches the weight
+
+==============================================================================
+=== cell 10
+==============================================================================
+2a. toy chain  w1=3, x=2, w2=4, t=20
+    forward: h=6.0, y=24.0, loss=16.0
+    dL/dy=8.0  dL/dw2=48.0  dL/dh=32.0  dL/dw1=64.0
+    autograd w1.grad=64.0  w2.grad=48.0
+    central diff (eps=0.001): 63.9958  vs autograd 64.0000  (agree to 4.17e-03)
+
+==============================================================================
+=== cell 11
+==============================================================================
+2b. real weight blocks[0].attn.c_attn.weight[316,93]  (eps=0.01)
+    L(w)      = 4.186348
+    L(w+eps)  = 4.185594
+    L(w-eps)  = 4.187103
+    central-difference grad = -0.075436
+    autograd .grad          = -0.075493
+    absolute difference     = 5.70e-05
+
+==============================================================================
+=== cell 13
+==============================================================================
+3a. static replica of the lesson's numbers
+    micro-batches (tokens, mean_loss): [(4, 2.0), (4, 2.0), (2, 5.0)]
+    correct  = total_loss/total_tokens = 26.0/10 = 2.6000
+    wrong    = average of the means     = 3.0000
+    error    = 15.4%  (lesson: 2.6000 vs 3.0000 = 15.4%)
+
+==============================================================================
+=== cell 14
+==============================================================================
+3b. final loss gap, unequal token counts: 0.0003
+    final loss gap, equal token counts:   0.0000  (near zero — this is why it hides)
+    saved assets/nanogpt_accumulation_curves.png
+
+==============================================================================
+=== cell 16
+==============================================================================
+4. engineered spike at step 30: grad norm 3.726 -> 165.282
+   loss at step 30: 3.3220  (baseline 3.2239)
+   loss visibly cracks at step: 31  (lag = 1 steps)
+   saved assets/nanogpt_norm_before_loss.png
+
+==============================================================================
+=== cell 18
+==============================================================================
+5a. measured peak: 15.69 TFLOP/s  (4096x4096 matmul, torch.float16, cuda)
+
+==============================================================================
+=== cell 19
+==============================================================================
+5b. N = 813,440 params
+    measured tokens/s = 86,021  (40 steps, B=8, T=128, dtype=torch.float16)
+    achieved FLOP/s   = 0.42 TFLOP/s
+    peak FLOP/s       = 15.69 TFLOP/s  (measured: 4096x4096 matmul benchmark, same device/dtype)
+    MFU               = 2.68%
+    device            = Tesla T4 (sm_75), bf16-native=False
+
+==============================================================================
+=== cell 21
+==============================================================================
+0.1 in binary (repeating): 0.0001100110011001100110011... = 1.10011001100...(2) x 2^-4
+
+fp32  (1+8+23): sign=0  exponent=123 (biased, unbiased=-4)  mantissa=10011001100110011001101
+      stored value = 0.1000000015
+      representation error = 1.490e-09
+
+bf16  (1+8+7):  sign=0  exponent=123 (biased, unbiased=-4)  mantissa=1001101
+      stored value (hand-decoded) = 0.1000976562   ml_dtypes stores = 0.1000976562
+      representation error = 9.766e-05
+
+fp8 E4M3 (1+4+3): sign=0  exponent=3 (biased, unbiased=-4)  mantissa=101
+      stored value (hand-decoded) = 0.101562   ml_dtypes stores = 0.101562
+      representation error = 1.562e-03
+
+6b. which one would you train in, and why: bf16 — same fp32 exponent range as this GPU's
+    other formats, no loss-scaling knob to get wrong; fp8 E4M3 is named as the production
+    recipe it now is, not as what this run trains in.
+
+==============================================================================
+=== cell 23
+==============================================================================
+===RESULTS-JSON-BEGIN===
+{"env": {"in_colab": true, "device": "cuda", "gpu_name": "Tesla T4", "sm": "75", "bf16_native": false, "train_dtype": "torch.float16", "torch": "2.11.0+cu128"}, "config": {"V": 65, "C": 128, "n_layer": 4, "n_head": 4, "T": 128, "B": 8, "N_params": 813440, "dataset": "nanoGPT tiny-Shakespeare, char-level"}, "1_shapes": {"tokens": "(8, 128)", "hidden": "(8, 128, 128)", "lm_head_weight": "(65, 128)", "logits": "(8, 128, 65)", "logits_grad": "(8, 128, 65)", "lm_head_weight_grad": "(65, 128)", "tied_grad_is_shared": "True", "qkv_weight_grad": "(384, 128)"}, "2_gradient_check": {"toy_chain": {"w1": 3.0, "w2": 4.0, "loss": 2.811227321624756, "dL_dw1_analytic": 64.0, "dL_dw1_autograd": 64.0, "dL_dw1_central_diff": 63.99583435058594}, "real_weight": {"row": 316, "col": 93, "eps": 0.01, "central_diff": -0.07543563842773438, "autograd": -0.07549268752336502, "abs_diff": 5.704909563064575e-05}}, "3_accumulation": {"static": {"micro_batches": [[4, 2.0], [4, 2.0], [2, 5.0]], "correct": 2.6, "wrong": 3.0, "pct_error": 15.38461538461538}, "curves": {"final_gap_unequal_tokens": 0.0003400300678451096, "final_gap_equal_tokens": 6.007397246321489e-08, "steps": 120}}, "4_norm_before_loss": {"bad_step": 30, "scale": 50.0, "norm_before": 3.7262041568756104, "norm_at": 165.28244018554688, "loss_baseline": 3.223939609527588, "loss_at_bad_step": 3.3220162391662598, "crack_step": 31, "lag_steps": 1}, "5_mfu": {"N": 813440, "tokens_per_sec": 86020.83984206816, "achieved_flops": 419836751766.79156, "peak_flops": 15692173284243.672, "peak_source": "measured: 4096x4096 matmul benchmark, same device/dtype", "mfu_pct": 2.6754531967114126, "dtype": "torch.float16"}, "6_bits": {"fp32": {"sign": 0, "exponent_biased": 123, "mantissa": "10011001100110011001101", "value": 0.10000000149011612, "error": 1.4901161138336505e-09}, "bf16": {"sign": 0, "exponent_biased": 123, "mantissa": "1001101", "value": 0.10009765625, "error": 9.765624999999445e-05}, "fp8_e4m3": {"sign": 0, "exponent_biased": 3, "mantissa": "101", "value": 0.1015625, "error": 0.0015624999999999944}}}
+===RESULTS-JSON-END===

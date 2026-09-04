@@ -1,0 +1,117 @@
+{
+  "env": {
+    "in_colab": true,
+    "device": "cuda",
+    "gpu_name": "Tesla T4",
+    "sm": "75",
+    "bf16_native": false,
+    "train_dtype": "torch.float16",
+    "torch": "2.11.0+cu128"
+  },
+  "config": {
+    "V": 65,
+    "C": 128,
+    "n_layer": 4,
+    "n_head": 4,
+    "T": 128,
+    "B": 8,
+    "N_params": 813440,
+    "dataset": "nanoGPT tiny-Shakespeare, char-level"
+  },
+  "1_shapes": {
+    "tokens": "(8, 128)",
+    "hidden": "(8, 128, 128)",
+    "lm_head_weight": "(65, 128)",
+    "logits": "(8, 128, 65)",
+    "logits_grad": "(8, 128, 65)",
+    "lm_head_weight_grad": "(65, 128)",
+    "tied_grad_is_shared": "True",
+    "qkv_weight_grad": "(384, 128)"
+  },
+  "2_gradient_check": {
+    "toy_chain": {
+      "w1": 3.0,
+      "w2": 4.0,
+      "loss": 2.811227321624756,
+      "dL_dw1_analytic": 64.0,
+      "dL_dw1_autograd": 64.0,
+      "dL_dw1_central_diff": 63.99583435058594
+    },
+    "real_weight": {
+      "row": 316,
+      "col": 93,
+      "eps": 0.01,
+      "central_diff": -0.07543563842773438,
+      "autograd": -0.07549268752336502,
+      "abs_diff": 5.704909563064575e-05
+    }
+  },
+  "3_accumulation": {
+    "static": {
+      "micro_batches": [
+        [
+          4,
+          2.0
+        ],
+        [
+          4,
+          2.0
+        ],
+        [
+          2,
+          5.0
+        ]
+      ],
+      "correct": 2.6,
+      "wrong": 3.0,
+      "pct_error": 15.38461538461538
+    },
+    "curves": {
+      "final_gap_unequal_tokens": 0.0003400300678451096,
+      "final_gap_equal_tokens": 6.007397246321489e-08,
+      "steps": 120
+    }
+  },
+  "4_norm_before_loss": {
+    "bad_step": 30,
+    "scale": 50.0,
+    "norm_before": 3.7262041568756104,
+    "norm_at": 165.28244018554688,
+    "loss_baseline": 3.223939609527588,
+    "loss_at_bad_step": 3.3220162391662598,
+    "crack_step": 31,
+    "lag_steps": 1
+  },
+  "5_mfu": {
+    "N": 813440,
+    "tokens_per_sec": 86020.83984206816,
+    "achieved_flops": 419836751766.79156,
+    "peak_flops": 15692173284243.672,
+    "peak_source": "measured: 4096x4096 matmul benchmark, same device/dtype",
+    "mfu_pct": 2.6754531967114126,
+    "dtype": "torch.float16"
+  },
+  "6_bits": {
+    "fp32": {
+      "sign": 0,
+      "exponent_biased": 123,
+      "mantissa": "10011001100110011001101",
+      "value": 0.10000000149011612,
+      "error": 1.4901161138336505e-09
+    },
+    "bf16": {
+      "sign": 0,
+      "exponent_biased": 123,
+      "mantissa": "1001101",
+      "value": 0.10009765625,
+      "error": 9.765624999999445e-05
+    },
+    "fp8_e4m3": {
+      "sign": 0,
+      "exponent_biased": 3,
+      "mantissa": "101",
+      "value": 0.1015625,
+      "error": 0.0015624999999999944
+    }
+  }
+}

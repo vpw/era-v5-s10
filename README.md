@@ -13,10 +13,10 @@ GPUs**, so the numbers can be compared rather than taken on faith:
 |---|---|---|
 | architecture | RMSNorm · RoPE · SwiGLU (Session 9's block) | LayerNorm · learned pos-emb · GELU MLP, weight-tied head (Karpathy's own) |
 | data | Session 2 BPE over en/hi/te/mr | char-level tiny-Shakespeare |
-| hardware | fresh EC2 **{{proxy.config.gpu_name}}** (sm_{{proxy.config.sm}}) | free-tier Colab **{{nanogpt.env.gpu_name}}** (sm_{{nanogpt.env.sm}}) |
-| bf16 native (tensor-core) | **{{proxy.config.bf16_native}}** | {{nanogpt.env.bf16_native}} |
-| training dtype measured | **{{proxy.config.train_dtype}}** | {{nanogpt.env.train_dtype}} |
-| parameters `N` | {{proxy.config.N_params:,}} | {{nanogpt.config.N_params:,}} |
+| hardware | fresh EC2 **NVIDIA A10G** (sm_86) | free-tier Colab **Tesla T4** (sm_75) |
+| bf16 native (tensor-core) | **True** | False |
+| training dtype measured | **torch.bfloat16** | torch.float16 |
+| parameters `N` | 8,333,568 | 813,440 |
 
 The instructor named nanoGPT directly, in the live-class transcript, as the model for students
 doing this assignment solo — and noted free Colab's GPU is sized for exactly that. Its GPU
@@ -41,30 +41,30 @@ bottom, committed with its outputs) and
 
 ## 1. Every tensor shape in the step
 
-**Proxy transformer** (`B={{proxy.config.B}}, T={{proxy.config.T}}, D={{proxy.config.D}}, V={{proxy.config.V:,}}`):
+**Proxy transformer** (`B=8, T=128, D=256, V=10,000`):
 
 | tensor | shape | what the dimensions are |
 |---|---|---|
-| `tokens` | `{{proxy.1_shapes.tokens}}` | B = independent sequences · T = position |
-| `hidden` (trunk output) | `{{proxy.1_shapes.hidden}}` | B, T as above · D = residual-stream width |
-| `head.weight` (`W_vocab`) | `{{proxy.1_shapes.head_weight}}` | V = one row per vocabulary entry · D — `z = h · W_vocabᵀ` |
-| `logits` | `{{proxy.1_shapes.logits}}` | B, T as above · V = one score per vocabulary entry |
-| `logits.grad` | `{{proxy.1_shapes.logits_grad}}` | same shape as `logits` — one gradient per (batch, position, vocab-entry) score |
-| `head.weight.grad` | `{{proxy.1_shapes.head_weight_grad}}` | same shape as `head.weight` — every vocabulary row gets an update |
-| `trunk.embed.weight.grad` | `{{proxy.1_shapes.embed_weight_grad}}` | `[V, D]` — the input embedding table |
-| `attn.qkv.weight.grad` | `{{proxy.1_shapes.qkv_weight_grad}}` | `[3D, D]` — packed Q,K,V, gradient matches the weight |
+| `tokens` | `(8, 128)` | B = independent sequences · T = position |
+| `hidden` (trunk output) | `(8, 128, 256)` | B, T as above · D = residual-stream width |
+| `head.weight` (`W_vocab`) | `(10000, 256)` | V = one row per vocabulary entry · D — `z = h · W_vocabᵀ` |
+| `logits` | `(8, 128, 10000)` | B, T as above · V = one score per vocabulary entry |
+| `logits.grad` | `(8, 128, 10000)` | same shape as `logits` — one gradient per (batch, position, vocab-entry) score |
+| `head.weight.grad` | `(10000, 256)` | same shape as `head.weight` — every vocabulary row gets an update |
+| `trunk.embed.weight.grad` | `(10000, 256)` | `[V, D]` — the input embedding table |
+| `attn.qkv.weight.grad` | `(768, 256)` | `[3D, D]` — packed Q,K,V, gradient matches the weight |
 
-**nanoGPT** (`B={{nanogpt.config.B}}, T={{nanogpt.config.T}}, C={{nanogpt.config.C}}, V={{nanogpt.config.V}}`):
+**nanoGPT** (`B=8, T=128, C=128, V=65`):
 
 | tensor | shape | what the dimensions are |
 |---|---|---|
-| `tokens` | `{{nanogpt.1_shapes.tokens}}` | B = independent char windows · T = position |
-| `wte(tokens)+wpe(pos)` hidden | `{{nanogpt.1_shapes.hidden}}` | B, T as above · C = embedding width |
-| `lm_head.weight` (tied to `wte.weight`) | `{{nanogpt.1_shapes.lm_head_weight}}` | V = one row per character · C — same tensor as the input embedding |
-| `logits` | `{{nanogpt.1_shapes.logits}}` | B, T as above · V = one score per character |
-| `logits.grad` | `{{nanogpt.1_shapes.logits_grad}}` | same shape as `logits` |
-| `lm_head.weight.grad` | `{{nanogpt.1_shapes.lm_head_weight_grad}}` | because of tying, this **is** `wte.weight.grad` too, not merely equal to it (`{{nanogpt.1_shapes.tied_grad_is_shared}}`) |
-| `attn.c_attn.weight.grad` | `{{nanogpt.1_shapes.qkv_weight_grad}}` | `[3C, C]` — packed Q,K,V |
+| `tokens` | `(8, 128)` | B = independent char windows · T = position |
+| `wte(tokens)+wpe(pos)` hidden | `(8, 128, 128)` | B, T as above · C = embedding width |
+| `lm_head.weight` (tied to `wte.weight`) | `(65, 128)` | V = one row per character · C — same tensor as the input embedding |
+| `logits` | `(8, 128, 65)` | B, T as above · V = one score per character |
+| `logits.grad` | `(8, 128, 65)` | same shape as `logits` |
+| `lm_head.weight.grad` | `(65, 128)` | because of tying, this **is** `wte.weight.grad` too, not merely equal to it (`True`) |
+| `attn.c_attn.weight.grad` | `(384, 128)` | `[3C, C]` — packed Q,K,V |
 
 nanoGPT's weight tying is the one shape fact the proxy model doesn't have: `lm_head.weight` and
 `wte.weight` are the *same tensor*, so their gradients are identical by construction, not by
@@ -79,12 +79,12 @@ central-difference check on one real weight from each model actually being train
 
 | | proxy transformer | nanoGPT |
 |---|---|---|
-| toy chain `∂L/∂w1` — analytic | {{proxy.2_gradient_check.toy_chain.dL_dw1_analytic}} | {{nanogpt.2_gradient_check.toy_chain.dL_dw1_analytic}} |
-| toy chain `∂L/∂w1` — autograd | {{proxy.2_gradient_check.toy_chain.dL_dw1_autograd}} | {{nanogpt.2_gradient_check.toy_chain.dL_dw1_autograd}} |
-| toy chain `∂L/∂w1` — central diff (ε=1e-3) | {{proxy.2_gradient_check.toy_chain.dL_dw1_central_diff:.4f}} | {{nanogpt.2_gradient_check.toy_chain.dL_dw1_central_diff:.4f}} |
-| real weight — autograd | {{proxy.2_gradient_check.real_weight.autograd:.6f}} | {{nanogpt.2_gradient_check.real_weight.autograd:.6f}} |
-| real weight — central diff | {{proxy.2_gradient_check.real_weight.central_diff:.6f}} | {{nanogpt.2_gradient_check.real_weight.central_diff:.6f}} |
-| absolute difference | {{proxy.2_gradient_check.real_weight.abs_diff:.2e}} | {{nanogpt.2_gradient_check.real_weight.abs_diff:.2e}} |
+| toy chain `∂L/∂w1` — analytic | 64.0 | 64.0 |
+| toy chain `∂L/∂w1` — autograd | 64.0 | 64.0 |
+| toy chain `∂L/∂w1` — central diff (ε=1e-3) | 63.9958 | 63.9958 |
+| real weight — autograd | 0.021285 | -0.075493 |
+| real weight — central diff | 0.021362 | -0.075436 |
+| absolute difference | 7.75e-05 | 5.70e-05 |
 
 The lesson's own worked case agrees to eight decimals; both models' real-weight checks land at
 the precision floor of a central difference in fp32 — evidence that autograd is bookkeeping, not
@@ -97,18 +97,18 @@ a separate approximate computation that happens to usually agree.
 **Static replica of the lesson's own numbers** (identical arithmetic in both notebooks, since it
 doesn't depend on a model):
 
-- micro-batches (tokens, mean loss): `{{proxy.3_accumulation.static.micro_batches}}`
-- correct (total loss ÷ total tokens): **{{proxy.3_accumulation.static.correct:.4f}}**
-- wrong (average of the per-micro-batch means): **{{proxy.3_accumulation.static.wrong:.4f}}**
-- error: **{{proxy.3_accumulation.static.pct_error:.1f}}%** (lesson: 2.6000 vs 3.0000 = 15.4%)
+- micro-batches (tokens, mean loss): `[[4, 2.0], [4, 2.0], [2, 5.0]]`
+- correct (total loss ÷ total tokens): **2.6000**
+- wrong (average of the per-micro-batch means): **3.0000**
+- error: **15.4%** (lesson: 2.6000 vs 3.0000 = 15.4%)
 
 **As training curves**, micro-batches of two different token counts, run to
-{{proxy.3_accumulation.curves.steps}} steps:
+120 steps:
 
 | | proxy transformer | nanoGPT |
 |---|---|---|
-| final loss gap, **unequal** token counts | {{proxy.3_accumulation.curves.final_gap_unequal_tokens:.4f}} | {{nanogpt.3_accumulation.curves.final_gap_unequal_tokens:.4f}} |
-| final loss gap, **equal** token counts | {{proxy.3_accumulation.curves.final_gap_equal_tokens:.4f}} | {{nanogpt.3_accumulation.curves.final_gap_equal_tokens:.4f}} |
+| final loss gap, **unequal** token counts | 0.0391 | 0.0003 |
+| final loss gap, **equal** token counts | 0.0000 | 0.0000 |
 
 ![proxy accumulation curves](assets/proxy_accumulation_curves.png)
 ![nanogpt accumulation curves](assets/nanogpt_accumulation_curves.png)
@@ -129,11 +129,11 @@ in that same step's own (pre-update) loss.
 
 | | proxy transformer | nanoGPT |
 |---|---|---|
-| engineered step | {{proxy.4_norm_before_loss.bad_step}} | {{nanogpt.4_norm_before_loss.bad_step}} |
-| grad norm, step before → at | {{proxy.4_norm_before_loss.norm_before:.2f}} → {{proxy.4_norm_before_loss.norm_at:.2f}} | {{nanogpt.4_norm_before_loss.norm_before:.2f}} → {{nanogpt.4_norm_before_loss.norm_at:.2f}} |
-| loss at the engineered step | {{proxy.4_norm_before_loss.loss_at_bad_step:.4f}} (baseline {{proxy.4_norm_before_loss.loss_baseline:.4f}}) | {{nanogpt.4_norm_before_loss.loss_at_bad_step:.4f}} (baseline {{nanogpt.4_norm_before_loss.loss_baseline:.4f}}) |
-| step the loss visibly cracks | {{proxy.4_norm_before_loss.crack_step}} | {{nanogpt.4_norm_before_loss.crack_step}} |
-| lag, in steps | **{{proxy.4_norm_before_loss.lag_steps}}** | **{{nanogpt.4_norm_before_loss.lag_steps}}** |
+| engineered step | 30 | 30 |
+| grad norm, step before → at | 10.43 → 81.32 | 3.73 → 165.28 |
+| loss at the engineered step | 8.9659 (baseline 8.9249) | 3.3220 (baseline 3.2239) |
+| step the loss visibly cracks | 31 | 31 |
+| lag, in steps | **1** | **1** |
 
 ![proxy norm before loss](assets/proxy_norm_before_loss.png)
 ![nanogpt norm before loss](assets/nanogpt_norm_before_loss.png)
@@ -153,13 +153,13 @@ the timed training loop.
 
 | | proxy transformer (EC2) | nanoGPT (Colab) |
 |---|---|---|
-| device | {{proxy.config.gpu_name}} (sm_{{proxy.config.sm}}) | {{nanogpt.env.gpu_name}} (sm_{{nanogpt.env.sm}}) |
-| dtype measured | **{{proxy.5_mfu.dtype}}** | **{{nanogpt.5_mfu.dtype}}** |
-| `N` (parameters) | {{proxy.5_mfu.N:,}} | {{nanogpt.5_mfu.N:,}} |
-| measured tokens/s | {{proxy.5_mfu.tokens_per_sec:,.0f}} | {{nanogpt.5_mfu.tokens_per_sec:,.0f}} |
-| achieved FLOP/s | {{proxy.5_mfu.achieved_flops:.3e}} | {{nanogpt.5_mfu.achieved_flops:.3e}} |
-| peak FLOP/s ({{proxy.5_mfu.peak_source}}) | {{proxy.5_mfu.peak_flops:.3e}} | {{nanogpt.5_mfu.peak_flops:.3e}} |
-| **MFU** | **{{proxy.5_mfu.mfu_pct:.2f}}%** | **{{nanogpt.5_mfu.mfu_pct:.2f}}%** |
+| device | NVIDIA A10G (sm_86) | Tesla T4 (sm_75) |
+| dtype measured | **torch.bfloat16** | **torch.float16** |
+| `N` (parameters) | 8,333,568 | 813,440 |
+| measured tokens/s | 66,711 | 86,021 |
+| achieved FLOP/s | 3.336e+12 | 4.198e+11 |
+| peak FLOP/s (measured: 4096x4096 matmul benchmark, same device/dtype) | 6.233e+13 | 1.569e+13 |
+| **MFU** | **5.35%** | **2.68%** |
 
 Healthy is 35–50%; the lesson's own worked example (a 9B model at 12,000 tok/s on eight H100s)
 lands at 8.2% and looks, on its loss curve alone, indistinguishable from 45%. Neither run here is
@@ -189,9 +189,9 @@ notebooks, shown here from the proxy run:
 
 | format | bits (sign+exp+mantissa) | sign | exponent (biased) | mantissa | stored value | error |
 |---|---|---|---|---|---|---|
-| fp32 | 1+8+23 | {{proxy.6_bits.fp32.sign}} | {{proxy.6_bits.fp32.exponent_biased}} | `{{proxy.6_bits.fp32.mantissa}}` | {{proxy.6_bits.fp32.value:.10f}} | {{proxy.6_bits.fp32.error:.3e}} |
-| bf16 | 1+8+7 | {{proxy.6_bits.bf16.sign}} | {{proxy.6_bits.bf16.exponent_biased}} | `{{proxy.6_bits.bf16.mantissa}}` | {{proxy.6_bits.bf16.value:.10f}} | {{proxy.6_bits.bf16.error:.3e}} |
-| fp8 E4M3 | 1+4+3 | {{proxy.6_bits.fp8_e4m3.sign}} | {{proxy.6_bits.fp8_e4m3.exponent_biased}} | `{{proxy.6_bits.fp8_e4m3.mantissa}}` | {{proxy.6_bits.fp8_e4m3.value:.6f}} | {{proxy.6_bits.fp8_e4m3.error:.3e}} |
+| fp32 | 1+8+23 | 0 | 123 | `10011001100110011001101` | 0.1000000015 | 1.490e-09 |
+| bf16 | 1+8+7 | 0 | 123 | `1001101` | 0.1000976562 | 9.766e-05 |
+| fp8 E4M3 | 1+4+3 | 0 | 3 | `101` | 0.101562 | 1.562e-03 |
 
 Both cross-checks (proxy and nanoGPT notebooks, run independently) agree bit-for-bit — this is
 pure format arithmetic, so it should, and did.
